@@ -17,6 +17,10 @@
 //   13. detach() 放手但不取消
 //   14. swap() 交换取消权
 //   15. 放进容器（依赖移动构造）
+//   16. QtFuture::makeReadyValueFuture：已完成 future 不挂起，同步返回结果
+//   17. 已完成 future 携带 QString 这类非平凡类型
+//   18. 已完成 future + 真正异步 future 混用，恢复线程不变
+//   19. 已完成 future：协程已经结束，destroy() 是 no-op
 //
 // 注意：头文件里的日志开关是按编译单元生效的，
 //       这里在 include 之前把 TASK_LOG_ENABLED 打开，才能断言 unhandled_exception 的输出。
@@ -131,6 +135,38 @@ AsyncTask awaitPromiseException(State *s)
         s->caught = true;
         s->message = e.message();
     }
+    s->done = true;
+}
+
+// 已完成 future：await_ready() 为 true，co_await 处不挂起，调用返回时协程已结束
+AsyncTask awaitReadyValue(State *s)
+{
+    s->started = true;
+    s->value = co_await QtFuture::makeReadyValueFuture(7);
+    s->resumeThread = QThread::currentThread();
+    s->done = true;
+}
+
+// 已完成 future 携带非平凡类型
+AsyncTask awaitReadyText(State *s)
+{
+    s->started = true;
+    s->message = co_await QtFuture::makeReadyValueFuture(QStringLiteral("hello future"));
+    s->resumeThread = QThread::currentThread();
+    s->done = true;
+}
+
+// 已完成 future 之后再等一个真正异步的 future，恢复线程应与发起线程一致
+AsyncTask awaitReadyThenRun(State *s)
+{
+    s->started = true;
+    const int readyPart = co_await QtFuture::makeReadyValueFuture(10);
+    const int asyncPart = co_await QtConcurrent::run([] {
+        QThread::msleep(200);
+        return 32;
+    });
+    s->value = readyPart + asyncPart;
+    s->resumeThread = QThread::currentThread();
     s->done = true;
 }
 
@@ -464,6 +500,58 @@ private slots:
             QTRY_VERIFY_WITH_TIMEOUT(states[i].done, 5000);
             QCOMPARE(states[i].value, i + 1);
         }
+    }
+
+    // 16. makeReadyValueFuture 已完成：co_await 不挂起，调用返回时协程就已经跑完
+    void testReadyValueResumeSynchronously()
+    {
+        State s;
+        awaitReadyValue(&s);
+
+        // 没有挂起，因此不需要 QTRY / 事件循环，返回即完成
+        QVERIFY(s.started);
+        QVERIFY(s.done);
+        QCOMPARE(s.value, 7);
+        QCOMPARE(s.resumeThread, QThread::currentThread());
+    }
+
+    // 17. 已完成 future 携带 QString，值完整带回
+    void testReadyValueWithString()
+    {
+        State s;
+        awaitReadyText(&s);
+
+        QVERIFY(s.done);
+        QCOMPARE(s.message, QStringLiteral("hello future"));
+        QCOMPARE(s.resumeThread, QThread::currentThread());
+    }
+
+    // 18. 已完成 future 与真正异步 future 混用，恢复线程仍是发起线程
+    void testReadyValueThenAsync()
+    {
+        State s;
+        AsyncTask task = awaitReadyThenRun(&s);
+
+        QVERIFY(s.started);
+        QTRY_VERIFY_WITH_TIMEOUT(s.done, 5000);
+        QCOMPARE(s.value, 42);
+        QCOMPARE(s.resumeThread, QThread::currentThread());
+
+        task.destroy(); // 已结束，no-op
+    }
+
+    // 19. 已完成 future：协程早已结束，valid() 仍为真但 destroy() 是安全的 no-op
+    void testReadyValueDestroyIsNoOp()
+    {
+        State s;
+        AsyncTask task = awaitReadyValue(&s);
+
+        QVERIFY(s.done);
+        QVERIFY(task.valid());
+
+        task.destroy(); // finished == true，直接返回
+        task.destroy(); // 可重复调用
+        QCOMPARE(s.value, 7);
     }
 };
 

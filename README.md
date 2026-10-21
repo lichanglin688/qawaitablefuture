@@ -145,6 +145,18 @@ int main(int argc, char *argv[])
 }
 ```
 
+### 6. 已完成的 future（`QtFuture::makeReadyValueFuture`）
+
+```cpp
+AsyncTask withReadyValue()
+{
+    const int v = co_await QtFuture::makeReadyValueFuture(1234);
+    qDebug() << v;   // 1234
+}
+```
+
+这类 future 一出生就是完成态，`await_ready()` 直接返回 `true`，`co_await` 处**不会挂起**：既不创建 `QFutureWatcher`，也不依赖事件循环，协程同步往下跑。适合把同步值直接塞进协程流程，或与真正异步的 future 混用。
+
 ## AsyncTask 的所有权语义
 
 `AsyncTask` 不是 `unique_ptr`，它只管"取消权"，不管协程的生命周期：
@@ -214,7 +226,7 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-`main.cpp` 是六个场景的演示程序（正常返回、两种异常回传、未捕获异常、`destroy()` 取消），`tests/test_qawaitablefuture.cpp` 覆盖了上述所有权与线程行为。
+`main.cpp` 是七个场景的演示程序（正常返回、两种异常回传、未捕获异常、`destroy()` 取消、`makeReadyValueFuture` 已完成值），`tests/test_qawaitablefuture.cpp` 覆盖了上述所有权与线程行为。
 
 ## 文件结构
 

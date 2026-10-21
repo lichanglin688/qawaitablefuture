@@ -7,6 +7,7 @@
 //   demo4  子线程里用 QPromise::setException 抛异常，主线程 co_await 时 catch
 //   demo5  不 catch，异常最终进 promise_type::unhandled_exception
 //   demo6  被外部 destroy() 取消，演示 AsyncTask 的所有权语义
+//   demo7  QtFuture::makeReadyValueFuture 完成的 future：co_await 处不挂起，同步往下跑
 //
 // 说明：QtConcurrent::run 只认 QException（及其子类），
 //       其它类型的异常会被替换成 QUnhandledException；
@@ -162,6 +163,25 @@ AsyncTask demoCancellable()
     log(QString("demo6 end, result = %1（被取消的话这行不会出现）").arg(value));
 }
 
+// demo7：QtFuture::makeReadyValueFuture 造出来的 future 一出生就是完成态
+//         await_ready() 直接返回 true，co_await 处不会挂起，协程同步往下跑，
+//         既不创建 QFutureWatcher，也不依赖事件循环
+AsyncTask demoReadyValue()
+{
+    log("demo7 begin");
+
+    const QString tag = co_await QtFuture::makeReadyValueFuture(QStringLiteral("ready"));
+    log(QString("demo7 第一个 co_await 同步返回，tag = %1").arg(tag));
+
+    // 再等一个真正异步的 future：这一次才会挂起，并由事件循环恢复到本线程
+    const int value = co_await QtConcurrent::run([] {
+        QThread::msleep(300);
+        return 1234;
+    });
+
+    log(QString("demo7 end, ready value = %1").arg(value));
+}
+
 } // namespace
 
 int main(int argc, char *argv[])
@@ -177,6 +197,7 @@ int main(int argc, char *argv[])
     demoPromiseOk();
     demoPromiseThrow();
     demoUncaught();
+    demoReadyValue();
 
     // 持有返回值：AsyncTask 就是这段协程的所有权，拿着它才能提前 destroy()（取消）
     AsyncTask cancelable = demoCancellable();

@@ -145,6 +145,18 @@ int main(int argc, char *argv[])
 }
 ```
 
+### 6. Already-finished futures (`QtFuture::makeReadyValueFuture`)
+
+```cpp
+AsyncTask withReadyValue()
+{
+    const int v = co_await QtFuture::makeReadyValueFuture(1234);
+    qDebug() << v;   // 1234
+}
+```
+
+Such a future is finished from birth: `await_ready()` returns `true`, so the `co_await` **never suspends**. No `QFutureWatcher` is created and no event loop is needed — the coroutine just continues synchronously. Handy for feeding a plain value into a coroutine flow, or mixing it with genuinely asynchronous futures.
+
 ## `AsyncTask` ownership semantics
 
 `AsyncTask` is not a `unique_ptr`: it owns the *right to cancel*, not the coroutine's lifetime.
@@ -214,7 +226,7 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-`main.cpp` is a demo with six scenarios (normal result, two exception paths, uncaught exception, `destroy()` cancellation); `tests/test_qawaitablefuture.cpp` covers the ownership and threading behaviour described above.
+`main.cpp` is a demo with seven scenarios (normal result, two exception paths, uncaught exception, `destroy()` cancellation, `makeReadyValueFuture`); `tests/test_qawaitablefuture.cpp` covers the ownership and threading behaviour described above.
 
 ## Layout
 
