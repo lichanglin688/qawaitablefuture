@@ -175,7 +175,7 @@ public:
     bool await_ready() const noexcept
     {
         TASK_LOG();
-        return future_.isFinished() || future_.isCanceled();
+        return future_.isFinished();
     }
 
     void await_suspend(std::coroutine_handle<> h)
