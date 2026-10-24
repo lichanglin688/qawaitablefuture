@@ -4,6 +4,7 @@
 #include <coroutine>
 #include <exception>
 #include <memory>
+#include <type_traits>
 #include <utility>
 
 #include <QCoreApplication>
@@ -47,15 +48,17 @@
 
 #endif
 
-// AsyncTask：协程句柄的"可取消引用"（不是 strict unique_ptr 所有权）
+namespace async {
+
+// Task：协程句柄的"可取消引用"（不是 strict unique_ptr 所有权）
 //   - 调用方丢弃返回值：fire-and-forget，协程跑到结束自行释放帧，但无法再取消它；
 //   - 调用方持有返回值：可以在外部 destroy()，把仍挂在 co_await 上的协程提前销毁（取消）；
-//   - ~AsyncTask() 不自动 destroy()，需要提前结束时必须显式 destroy()；
+//   - ~Task() 不自动 destroy()，需要提前结束时必须显式 destroy()；
 //   - 移动 / detach() 只转移或放弃"取消权"，不会取消协程（与析构保持一致）；
 //     因此 detach() 或放手之后，协程会继续跑到自然结束，不要再指望能取消它。
-class AsyncTask {
+class Task {
 public:
-    struct Data{
+    struct Data {
         std::coroutine_handle<> handle{};
         bool finished = false;
     };
@@ -63,12 +66,12 @@ public:
         std::shared_ptr<Data> state =
             std::make_shared<Data>();
 
-        AsyncTask get_return_object()
+        Task get_return_object()
         {
             TASK_LOG();
             auto h = std::coroutine_handle<promise_type>::from_promise(*this);
             state->handle = h;
-            return AsyncTask(state);
+            return Task(state);
         }
 
         std::suspend_never initial_suspend() noexcept
@@ -102,19 +105,19 @@ public:
         }
     };
 
-    AsyncTask() = default;
+    Task() = default;
 
-    explicit AsyncTask(std::shared_ptr<Data> state)
+    explicit Task(std::shared_ptr<Data> state)
         : state_(std::move(state)) {}
 
-    AsyncTask(const AsyncTask&) = delete;
-    AsyncTask& operator=(const AsyncTask&) = delete;
+    Task(const Task&) = delete;
+    Task& operator=(const Task&) = delete;
 
-    AsyncTask(AsyncTask&& other) noexcept
+    Task(Task&& other) noexcept
         : state_(std::move(other.state_)) {}
 
     // 只转移取消权，不取消原先持有的协程（它继续跑到自然结束）
-    AsyncTask& operator=(AsyncTask&& other) noexcept
+    Task& operator=(Task&& other) noexcept
     {
         if (this != &other)
             state_ = std::move(other.state_);
@@ -127,7 +130,7 @@ public:
         state_.reset();
     }
 
-    void swap(AsyncTask& other) noexcept
+    void swap(Task& other) noexcept
     {
         state_.swap(other.state_);
     }
@@ -138,7 +141,7 @@ public:
         return static_cast<bool>(state_);
     }
 
-    ~AsyncTask()
+    ~Task()
     {
     }
 
@@ -158,7 +161,7 @@ private:
     std::shared_ptr<Data> state_;
 };
 
-inline void swap(AsyncTask& a, AsyncTask& b) noexcept
+inline void swap(Task& a, Task& b) noexcept
 {
     a.swap(b);
 }
@@ -175,7 +178,7 @@ public:
     bool await_ready() const noexcept
     {
         TASK_LOG();
-        return future_.isFinished();
+        return future_.isFinished() || future_.isCanceled();
     }
 
     void await_suspend(std::coroutine_handle<> h)
@@ -222,3 +225,10 @@ FutureAwaiter<T> operator co_await(QFuture<T> future)
 {
     return FutureAwaiter<T>(std::move(future));
 }
+
+} // namespace async
+
+// operator co_await 定义在 namespace async 里，而 QFuture 位于全局命名空间，
+// 只靠 ADL 找不到它。这里用 using 声明把它提到全局作用域，
+// 使 `co_await future;` 无需 `using namespace async;` 也能工作。
+using async::operator co_await;

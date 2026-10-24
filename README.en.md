@@ -5,7 +5,7 @@
 A single-header C++20 coroutine utility that lets you `co_await` a `QFuture` in Qt, so asynchronous flows read like synchronous code.
 
 ```cpp
-AsyncTask task()
+async::Task task()
 {
     const int v = co_await QtConcurrent::run([] {
         QThread::sleep(1);
@@ -20,7 +20,7 @@ AsyncTask task()
 - `co_await QFuture<T>` for any `T`, including `void`
 - Results are delivered through `QFutureWatcher` with `Qt::QueuedConnection`, so the coroutine **resumes on the thread that started the await** (that thread must run an event loop)
 - Exceptions stored in a `QFuture` are rethrown at the `co_await` site and can be handled with plain `try/catch`
-- `AsyncTask` is a "cancellable reference" to the coroutine frame: keep it to `destroy()` (cancel) the coroutine early
+- `async::Task` is a "cancellable reference" to the coroutine frame: keep it to `destroy()` (cancel) the coroutine early
 - Header-only, no source file, no moc; logging can be compiled out entirely
 
 ## Requirements
@@ -45,6 +45,8 @@ qt_add_executable(app main.cpp)
 target_link_libraries(app PRIVATE Qt::Core Qt::Concurrent)
 ```
 
+All types live in `namespace async`: `async::Task`, `async::FutureAwaiter`. `operator co_await` is defined there too, but the header ends with `using async::operator co_await;` to hoist it into the global namespace, so `co_await future;` works without `using namespace async;`. Add `using async::Task;` in your own files if you prefer the unqualified name.
+
 ## Minimal usage
 
 ### 1. Awaiting `QtConcurrent::run`
@@ -53,7 +55,7 @@ target_link_libraries(app PRIVATE Qt::Core Qt::Concurrent)
 #include "qawaitablefuture.h"
 #include <QtConcurrent>
 
-AsyncTask compute()
+async::Task compute()
 {
     const int v = co_await QtConcurrent::run([] {
         QThread::sleep(1);
@@ -77,7 +79,7 @@ int main(int argc, char *argv[])
 ### 2. Awaiting `QFuture<void>`
 
 ```cpp
-AsyncTask doWork()
+async::Task doWork()
 {
     co_await QtConcurrent::run([] { QThread::sleep(1); });
     qDebug() << "done";
@@ -87,7 +89,7 @@ AsyncTask doWork()
 ### 3. Returning a result from a worker thread via `QPromise`
 
 ```cpp
-AsyncTask withPromise()
+async::Task withPromise()
 {
     QPromise<int> promise;
     promise.start();
@@ -106,7 +108,7 @@ AsyncTask withPromise()
 ### 4. Exception handling
 
 ```cpp
-AsyncTask onError()
+async::Task onError()
 {
     try {
         co_await QtConcurrent::run([]() -> int {
@@ -123,12 +125,12 @@ An uncaught exception reaches `promise_type::unhandled_exception()`, which logs 
 ### 5. Cancellation
 
 ```cpp
-AsyncTask task = compute();   // you must keep the return value
+async::Task task = compute();   // you must keep the return value
 task.destroy();               // destroys a coroutine frame still suspended in co_await
 ```
 
 ```cpp
-AsyncTask cancellable()
+async::Task cancellable()
 {
     co_await QtConcurrent::run([] { QThread::sleep(10); });
     qDebug() << "this line never shows if cancelled";
@@ -138,7 +140,7 @@ int main(int argc, char *argv[])
 {
     QCoreApplication app(argc, argv);
 
-    AsyncTask task = cancellable();
+    async::Task task = cancellable();
     QTimer::singleShot(2000, &app, [&task] { task.destroy(); });
 
     return app.exec();
@@ -148,7 +150,7 @@ int main(int argc, char *argv[])
 ### 6. Already-finished futures (`QtFuture::makeReadyValueFuture`)
 
 ```cpp
-AsyncTask withReadyValue()
+async::Task withReadyValue()
 {
     const int v = co_await QtFuture::makeReadyValueFuture(1234);
     qDebug() << v;   // 1234
@@ -157,15 +159,15 @@ AsyncTask withReadyValue()
 
 Such a future is finished from birth: `await_ready()` returns `true`, so the `co_await` **never suspends**. No `QFutureWatcher` is created and no event loop is needed — the coroutine just continues synchronously. Handy for feeding a plain value into a coroutine flow, or mixing it with genuinely asynchronous futures.
 
-## `AsyncTask` ownership semantics
+## `async::Task` ownership semantics
 
-`AsyncTask` is not a `unique_ptr`: it owns the *right to cancel*, not the coroutine's lifetime.
+`async::Task` is not a `unique_ptr`: it owns the *right to cancel*, not the coroutine's lifetime.
 
 | Action | Effect on the coroutine |
 | --- | --- |
 | Return value discarded | Runs to completion and frees its own frame; no longer cancellable |
 | Return value kept | Can be `destroy()`ed (cancelled) at any time |
-| `~AsyncTask()` | Does **not** call `destroy()`; it simply lets go |
+| `~async::Task()` | Does **not** call `destroy()`; it simply lets go |
 | Move construction / assignment | Transfers the cancel right, source becomes empty; neither coroutine is affected |
 | `detach()` | Gives up the cancel right; the coroutine keeps running |
 | `swap()` | Exchanges the cancel right |
@@ -231,7 +233,7 @@ ctest --test-dir build --output-on-failure
 ## Layout
 
 ```
-qawaitablefuture.h              # everything: AsyncTask / FutureAwaiter / operator co_await
+qawaitablefuture.h              # everything: async::Task / async::FutureAwaiter / operator co_await
 main.cpp                       # demo program
 tests/test_qawaitablefuture.cpp # Qt Test cases
 CMakeLists.txt                 # demo target

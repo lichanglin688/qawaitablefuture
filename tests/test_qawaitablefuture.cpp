@@ -1,5 +1,5 @@
 // tests/test_qawaitablefuture.cpp
-// AsyncTask / co_await QFuture 的行为测试（Qt Test）
+// async::Task / co_await QFuture 的行为测试（Qt Test）
 //
 // 覆盖：
 //   1. QtConcurrent::run 正常返回值
@@ -69,7 +69,7 @@ struct State {
 
 // ---- 被测协程 ----
 
-AsyncTask awaitRunResult(State *s)
+async::Task awaitRunResult(State *s)
 {
     s->started = true;
     s->value = co_await QtConcurrent::run([] {
@@ -80,7 +80,7 @@ AsyncTask awaitRunResult(State *s)
     s->done = true;
 }
 
-AsyncTask awaitPromiseResult(State *s)
+async::Task awaitPromiseResult(State *s)
 {
     QPromise<int> promise;
     promise.start();
@@ -98,7 +98,7 @@ AsyncTask awaitPromiseResult(State *s)
     s->done = true;
 }
 
-AsyncTask awaitRunException(State *s)
+async::Task awaitRunException(State *s)
 {
     s->started = true;
     try {
@@ -116,7 +116,7 @@ AsyncTask awaitRunException(State *s)
     s->done = true;
 }
 
-AsyncTask awaitPromiseException(State *s)
+async::Task awaitPromiseException(State *s)
 {
     QPromise<void> promise;
     promise.start();
@@ -139,7 +139,7 @@ AsyncTask awaitPromiseException(State *s)
 }
 
 // 已完成 future：await_ready() 为 true，co_await 处不挂起，调用返回时协程已结束
-AsyncTask awaitReadyValue(State *s)
+async::Task awaitReadyValue(State *s)
 {
     s->started = true;
     s->value = co_await QtFuture::makeReadyValueFuture(7);
@@ -148,7 +148,7 @@ AsyncTask awaitReadyValue(State *s)
 }
 
 // 已完成 future 携带非平凡类型
-AsyncTask awaitReadyText(State *s)
+async::Task awaitReadyText(State *s)
 {
     s->started = true;
     s->message = co_await QtFuture::makeReadyValueFuture(QStringLiteral("hello future"));
@@ -157,7 +157,7 @@ AsyncTask awaitReadyText(State *s)
 }
 
 // 已完成 future 之后再等一个真正异步的 future，恢复线程应与发起线程一致
-AsyncTask awaitReadyThenRun(State *s)
+async::Task awaitReadyThenRun(State *s)
 {
     s->started = true;
     const int readyPart = co_await QtFuture::makeReadyValueFuture(10);
@@ -171,7 +171,7 @@ AsyncTask awaitReadyThenRun(State *s)
 }
 
 // 故意不 catch：异常应进 promise_type::unhandled_exception，且后续代码不再执行
-AsyncTask awaitUncaught(State *s)
+async::Task awaitUncaught(State *s)
 {
     s->started = true;
     const int value = co_await QtConcurrent::run([] {
@@ -184,7 +184,7 @@ AsyncTask awaitUncaught(State *s)
 }
 
 // 挂在一个永远不兑现的 promise 上，用来测 destroy() 取消
-AsyncTask suspendForever(const std::shared_ptr<QPromise<int>> &promise, State *s)
+async::Task suspendForever(const std::shared_ptr<QPromise<int>> &promise, State *s)
 {
     QFuture<int> future = promise->future();
     s->started = true;
@@ -276,14 +276,14 @@ private slots:
         QVERIFY(!s.done); // 异常后协程直接结束，不会继续往下走
     }
 
-    // 6. 持有 AsyncTask 才能 destroy() 取消；取消后再兑现 promise 也不会恢复协程
+    // 6. 持有 async::Task 才能 destroy() 取消；取消后再兑现 promise 也不会恢复协程
     void testDestroyCancelsSuspendedCoroutine()
     {
         auto promise = std::make_shared<QPromise<int>>();
         promise->start();
 
         State s;
-        AsyncTask task = suspendForever(promise, &s);
+        async::Task task = suspendForever(promise, &s);
         QTRY_VERIFY_WITH_TIMEOUT(s.started, 1000);
         QVERIFY(!s.done);
 
@@ -313,12 +313,12 @@ private slots:
     // 8. 拷贝必须被禁用，移动必须可用（编译期断言）
     void testTypeTraits()
     {
-        static_assert(!std::is_copy_constructible_v<AsyncTask>);
-        static_assert(!std::is_copy_assignable_v<AsyncTask>);
-        static_assert(std::is_move_constructible_v<AsyncTask>);
-        static_assert(std::is_move_assignable_v<AsyncTask>);
-        static_assert(std::is_nothrow_move_constructible_v<AsyncTask>);
-        static_assert(std::is_nothrow_move_assignable_v<AsyncTask>);
+        static_assert(!std::is_copy_constructible_v<async::Task>);
+        static_assert(!std::is_copy_assignable_v<async::Task>);
+        static_assert(std::is_move_constructible_v<async::Task>);
+        static_assert(std::is_move_assignable_v<async::Task>);
+        static_assert(std::is_nothrow_move_constructible_v<async::Task>);
+        static_assert(std::is_nothrow_move_assignable_v<async::Task>);
         QVERIFY(true); // 断言都在编译期完成，这里只是让槽函数有内容
     }
 
@@ -329,10 +329,10 @@ private slots:
         promise->start();
 
         State s;
-        AsyncTask first = suspendForever(promise, &s);
+        async::Task first = suspendForever(promise, &s);
         QTRY_VERIFY_WITH_TIMEOUT(s.started, 1000);
 
-        AsyncTask second = std::move(first);
+        async::Task second = std::move(first);
 
         promise->addResult(9);
         promise->finish();
@@ -351,10 +351,10 @@ private slots:
         promise->start();
 
         State s;
-        AsyncTask first = suspendForever(promise, &s);
+        async::Task first = suspendForever(promise, &s);
         QTRY_VERIFY_WITH_TIMEOUT(s.started, 1000);
 
-        AsyncTask second = std::move(first);
+        async::Task second = std::move(first);
         second.destroy();
 
         promise->addResult(1);
@@ -377,8 +377,8 @@ private slots:
 
         State s1;
         State s2;
-        AsyncTask a = suspendForever(promise1, &s1);
-        AsyncTask b = suspendForever(promise2, &s2);
+        async::Task a = suspendForever(promise1, &s1);
+        async::Task b = suspendForever(promise2, &s2);
         QTRY_VERIFY_WITH_TIMEOUT(s1.started && s2.started, 1000);
 
         b = std::move(a); // b 放弃 s2 的取消权，s2 继续跑
@@ -401,10 +401,10 @@ private slots:
         promise->start();
 
         State s;
-        AsyncTask task = suspendForever(promise, &s);
+        async::Task task = suspendForever(promise, &s);
         QTRY_VERIFY_WITH_TIMEOUT(s.started, 1000);
 
-        AsyncTask &self = task;
+        async::Task &self = task;
         task = std::move(self);
 
         promise->addResult(5);
@@ -416,11 +416,11 @@ private slots:
     // 13. 默认构造 / 被移动走的对象：destroy() 是安全的 no-op，valid() 为 false
     void testEmptyTaskIsSafe()
     {
-        AsyncTask empty;
+        async::Task empty;
         QVERIFY(!empty.valid());
         empty.destroy();
 
-        AsyncTask moved = std::move(empty);
+        async::Task moved = std::move(empty);
         moved.destroy();
         empty.destroy(); // 源对象已被掏空
         QVERIFY(!empty.valid());
@@ -433,7 +433,7 @@ private slots:
         promise->start();
 
         State s;
-        AsyncTask task = suspendForever(promise, &s);
+        async::Task task = suspendForever(promise, &s);
         QTRY_VERIFY_WITH_TIMEOUT(s.started, 1000);
         QVERIFY(task.valid());
 
@@ -458,8 +458,8 @@ private slots:
 
         State s1;
         State s2;
-        AsyncTask a = suspendForever(promise1, &s1);
-        AsyncTask b = suspendForever(promise2, &s2);
+        async::Task a = suspendForever(promise1, &s1);
+        async::Task b = suspendForever(promise2, &s2);
         QTRY_VERIFY_WITH_TIMEOUT(s1.started && s2.started, 1000);
 
         swap(a, b); // 现在 a 持有 s2、b 持有 s1
@@ -481,7 +481,7 @@ private slots:
     {
         State states[3];
         std::vector<std::shared_ptr<QPromise<int>>> promises;
-        std::vector<AsyncTask> tasks;
+        std::vector<async::Task> tasks;
 
         for (int i = 0; i < 3; ++i) {
             auto promise = std::make_shared<QPromise<int>>();
@@ -530,7 +530,7 @@ private slots:
     void testReadyValueThenAsync()
     {
         State s;
-        AsyncTask task = awaitReadyThenRun(&s);
+        async::Task task = awaitReadyThenRun(&s);
 
         QVERIFY(s.started);
         QTRY_VERIFY_WITH_TIMEOUT(s.done, 5000);
@@ -544,7 +544,7 @@ private slots:
     void testReadyValueDestroyIsNoOp()
     {
         State s;
-        AsyncTask task = awaitReadyValue(&s);
+        async::Task task = awaitReadyValue(&s);
 
         QVERIFY(s.done);
         QVERIFY(task.valid());

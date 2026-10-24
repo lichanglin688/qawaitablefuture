@@ -1,22 +1,22 @@
 // main.cpp
-// 演示：用 AsyncTask 协程 co_await QFuture
+// 演示：用 async::Task 协程 co_await QFuture
 //
 //   demo1  QtConcurrent::run 正常返回值
 //   demo2  QtConcurrent::run 抛异常（QException 子类，异常经 QFuture 带回来）
 //   demo3  子线程里用 QPromise 兑现结果，主线程 co_await
 //   demo4  子线程里用 QPromise::setException 抛异常，主线程 co_await 时 catch
 //   demo5  不 catch，异常最终进 promise_type::unhandled_exception
-//   demo6  被外部 destroy() 取消，演示 AsyncTask 的所有权语义
+//   demo6  被外部 destroy() 取消，演示 async::Task 的所有权语义
 //   demo7  QtFuture::makeReadyValueFuture 完成的 future：co_await 处不挂起，同步往下跑
 //
 // 说明：QtConcurrent::run 只认 QException（及其子类），
 //       其它类型的异常会被替换成 QUnhandledException；
 //       所以自定义异常请继承 QException，或用 QPromise::setException 自行投递。
 //
-// AsyncTask 对调用方的意义：它是协程句柄的所有权包装（像 unique_ptr 一样管着协程帧）
+// async::Task 对调用方的意义：它是协程句柄的所有权包装（像 unique_ptr 一样管着协程帧）
 //   - 不接收返回值（fire-and-forget）：协程自己跑到结束并释放帧，代价是调用方无法取消它；
 //   - 接收并持有：可以在外部调用 destroy()，把一个还挂在 co_await 上的协程提前销毁（取消）。
-//     注意 ~AsyncTask() 不会自动 destroy()，忘记持有就会一直挂在内存里等 future。
+//     注意 ~async::Task() 不会自动 destroy()，忘记持有就会一直挂在内存里等 future。
 
 #include "qawaitablefuture.h"
 
@@ -53,7 +53,7 @@ void log(const QString &text)
 }
 
 // demo1：最基础的用法，子线程算完，回到发起线程继续
-AsyncTask demoRunOk()
+async::Task demoRunOk()
 {
     log("demo1 begin");
 
@@ -67,7 +67,7 @@ AsyncTask demoRunOk()
 }
 
 // demo2：QtConcurrent::run 里抛异常，co_await 处直接 try/catch
-AsyncTask demoRunThrow()
+async::Task demoRunThrow()
 {
     log("demo2 begin");
 
@@ -89,7 +89,7 @@ AsyncTask demoRunThrow()
 }
 
 // demo3：子线程持有 QPromise，算完后 addResult + finish，主线程 await 对应的 future
-AsyncTask demoPromiseOk()
+async::Task demoPromiseOk()
 {
     log("demo3 begin");
 
@@ -109,7 +109,7 @@ AsyncTask demoPromiseOk()
 }
 
 // demo4：子线程里 setException，异常随 future 回到 co_await 处
-AsyncTask demoPromiseThrow()
+async::Task demoPromiseThrow()
 {
     log("demo4 begin");
 
@@ -136,7 +136,7 @@ AsyncTask demoPromiseThrow()
 }
 
 // demo5：不做任何 catch，异常冒泡到 promise_type::unhandled_exception
-AsyncTask demoUncaught()
+async::Task demoUncaught()
 {
     log("demo5 begin");
 
@@ -151,7 +151,7 @@ AsyncTask demoUncaught()
 }
 
 // demo6：故意跑很久，交给调用方在外部 destroy() 取消
-AsyncTask demoCancellable()
+async::Task demoCancellable()
 {
     log("demo6 begin, 我会睡 10 秒，正常等不到");
 
@@ -166,7 +166,7 @@ AsyncTask demoCancellable()
 // demo7：QtFuture::makeReadyValueFuture 造出来的 future 一出生就是完成态
 //         await_ready() 直接返回 true，co_await 处不会挂起，协程同步往下跑，
 //         既不创建 QFutureWatcher，也不依赖事件循环
-AsyncTask demoReadyValue()
+async::Task demoReadyValue()
 {
     log("demo7 begin");
 
@@ -199,8 +199,8 @@ int main(int argc, char *argv[])
     demoUncaught();
     demoReadyValue();
 
-    // 持有返回值：AsyncTask 就是这段协程的所有权，拿着它才能提前 destroy()（取消）
-    AsyncTask cancelable = demoCancellable();
+    // 持有返回值：async::Task 就是这段协程的所有权，拿着它才能提前 destroy()（取消）
+    async::Task cancelable = demoCancellable();
     QTimer::singleShot(2000, &app, [&cancelable] {
         log("main: 2 秒到了，销毁还挂着的 demo6 协程");
         cancelable.destroy(); // 已结束的协程是 no-op，这里它还在 co_await 上

@@ -5,7 +5,7 @@
 一个只有单头文件的 C++20 协程小库，让你在 Qt 里用 `co_await` 直接等待 `QFuture`，像写同步代码一样写异步流程。
 
 ```cpp
-AsyncTask task()
+async::Task task()
 {
     const int v = co_await QtConcurrent::run([] {
         QThread::sleep(1);
@@ -20,7 +20,7 @@ AsyncTask task()
 - `co_await QFuture<T>`，支持 `T` 为任意类型以及 `void`
 - 结果通过 `QFutureWatcher` 以 `Qt::QueuedConnection` 投递，**协程恢复到发起 await 的那个线程**（该线程需要有事件循环）
 - 异常从 `QFuture` 原样带回 `co_await` 处，可直接 `try/catch`
-- `AsyncTask` 是协程帧的"可取消引用"：持有它就能 `destroy()` 提前取消
+- `async::Task` 是协程帧的"可取消引用"：持有它就能 `destroy()` 提前取消
 - 头文件即可用，无源文件、无 moc，日志可通过宏整体关掉
 
 ## 环境要求
@@ -45,6 +45,8 @@ qt_add_executable(app main.cpp)
 target_link_libraries(app PRIVATE Qt::Core Qt::Concurrent)
 ```
 
+库里的类型都放在 `namespace async` 中：`async::Task`、`async::FutureAwaiter`。`operator co_await` 也定义在该命名空间内，但头文件末尾用 `using async::operator co_await;` 把它提到了全局作用域，因此 `co_await future;` 不需要写 `using namespace async;` 也能直接使用。若想少写前缀，可在自己文件里加 `using async::Task;`。
+
 ## 最精简用法
 
 ### 1. 等待 `QtConcurrent::run`
@@ -53,7 +55,7 @@ target_link_libraries(app PRIVATE Qt::Core Qt::Concurrent)
 #include "qawaitablefuture.h"
 #include <QtConcurrent>
 
-AsyncTask compute()
+async::Task compute()
 {
     const int v = co_await QtConcurrent::run([] {
         QThread::sleep(1);
@@ -77,7 +79,7 @@ int main(int argc, char *argv[])
 ### 2. 等待 `QFuture<void>`
 
 ```cpp
-AsyncTask doWork()
+async::Task doWork()
 {
     co_await QtConcurrent::run([] { QThread::sleep(1); });
     qDebug() << "done";
@@ -87,7 +89,7 @@ AsyncTask doWork()
 ### 3. 用 `QPromise` 从子线程回填结果
 
 ```cpp
-AsyncTask withPromise()
+async::Task withPromise()
 {
     QPromise<int> promise;
     promise.start();
@@ -106,7 +108,7 @@ AsyncTask withPromise()
 ### 4. 异常处理
 
 ```cpp
-AsyncTask onError()
+async::Task onError()
 {
     try {
         co_await QtConcurrent::run([]() -> int {
@@ -123,12 +125,12 @@ AsyncTask onError()
 ### 5. 取消
 
 ```cpp
-AsyncTask task = compute();   // 必须持有返回值
+async::Task task = compute();   // 必须持有返回值
 task.destroy();               // 销毁仍挂在 co_await 上的协程帧
 ```
 
 ```cpp
-AsyncTask cancellable()
+async::Task cancellable()
 {
     co_await QtConcurrent::run([] { QThread::sleep(10); });
     qDebug() << "被取消的话这行不会出现";
@@ -138,7 +140,7 @@ int main(int argc, char *argv[])
 {
     QCoreApplication app(argc, argv);
 
-    AsyncTask task = cancellable();
+    async::Task task = cancellable();
     QTimer::singleShot(2000, &app, [&task] { task.destroy(); });
 
     return app.exec();
@@ -148,7 +150,7 @@ int main(int argc, char *argv[])
 ### 6. 已完成的 future（`QtFuture::makeReadyValueFuture`）
 
 ```cpp
-AsyncTask withReadyValue()
+async::Task withReadyValue()
 {
     const int v = co_await QtFuture::makeReadyValueFuture(1234);
     qDebug() << v;   // 1234
@@ -157,15 +159,15 @@ AsyncTask withReadyValue()
 
 这类 future 一出生就是完成态，`await_ready()` 直接返回 `true`，`co_await` 处**不会挂起**：既不创建 `QFutureWatcher`，也不依赖事件循环，协程同步往下跑。适合把同步值直接塞进协程流程，或与真正异步的 future 混用。
 
-## AsyncTask 的所有权语义
+## async::Task 的所有权语义
 
-`AsyncTask` 不是 `unique_ptr`，它只管"取消权"，不管协程的生命周期：
+`async::Task` 不是 `unique_ptr`，它只管"取消权"，不管协程的生命周期：
 
 | 行为 | 协程 |
 | --- | --- |
 | 丢弃返回值 | 继续执行直到自然结束并自行释放帧，之后无法取消 |
 | 持有返回值 | 可随时 `destroy()` 提前销毁（取消） |
-| `~AsyncTask()` | **不会** `destroy()`，只是不管了 |
+| `~async::Task()` | **不会** `destroy()`，只是不管了 |
 | 移动构造 / 移动赋值 | 取消权转移，原对象变空；两侧协程都不受影响 |
 | `detach()` | 放弃取消权，协程继续跑到自然结束 |
 | `swap()` | 交换取消权 |
@@ -231,7 +233,7 @@ ctest --test-dir build --output-on-failure
 ## 文件结构
 
 ```
-qawaitablefuture.h              # 全部实现：AsyncTask / FutureAwaiter / operator co_await
+qawaitablefuture.h              # 全部实现：async::Task / async::FutureAwaiter / operator co_await
 main.cpp                       # 演示程序
 tests/test_qawaitablefuture.cpp # Qt Test 用例
 CMakeLists.txt                 # demo 目标
