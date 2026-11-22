@@ -159,7 +159,7 @@ async::Task withReadyValue()
 
 这类 future 一出生就是完成态，`await_ready()` 直接返回 `true`，`co_await` 处**不会挂起**：既不创建 `QFutureWatcher`，也不依赖事件循环，协程同步往下跑。适合把同步值直接塞进协程流程，或与真正异步的 future 混用。
 
-### 7. 取消（`cancellation.h`，单线程）
+### 7. 取消（`cancellation.h`）
 
 ```cpp
 async::CancellationSource source;
@@ -175,11 +175,11 @@ async::Task work()
     }
 }
 
-// 任意时刻（与 await 同一线程）发出取消信号：
+// 仅允许在发起 await 的线程调用（重复调用会重复发信号，由调用者负责）：
 source.requestCancel();
 ```
 
-语义：future 先完成则正常拿结果；取消信号先到则协程被唤醒，`co_await` 处抛 `async::OperationCancelled`，不再等待结果。**仅支持单线程使用**：`requestCancel()` 必须与发起 await 的线程相同（通常就是主线程）。`source` 可传 `nullptr`，此时退化为普通等待。`CancellationSource` 带 `Q_OBJECT`，需要 moc（本工程 AUTOMOC 已开启）。
+语义：future 先完成则正常拿结果；取消信号先到则协程被唤醒，`co_await` 处抛 `async::OperationCancelled`，不再等待结果。**单线程使用**：`requestCancel()` 必须与发起 await 的线程相同，发射走直连，协程在调用栈里同步醒来（注意重入风险）；取消早于挂起时，`co_await` 处直接抛出，不挂起。`source` 可传 `nullptr`，此时退化为普通等待。`CancellationSource` 带 `Q_OBJECT`，需要 moc（本工程 AUTOMOC 已开启）。
 
 ## async::Task 的所有权语义
 

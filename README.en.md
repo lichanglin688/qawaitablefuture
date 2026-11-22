@@ -159,7 +159,7 @@ async::Task withReadyValue()
 
 Such a future is finished from birth: `await_ready()` returns `true`, so the `co_await` **never suspends**. No `QFutureWatcher` is created and no event loop is needed — the coroutine just continues synchronously. Handy for feeding a plain value into a coroutine flow, or mixing it with genuinely asynchronous futures.
 
-### 7. Cancellation (`cancellation.h`, single-threaded)
+### 7. Cancellation (`cancellation.h`)
 
 ```cpp
 async::CancellationSource source;
@@ -175,11 +175,11 @@ async::Task work()
     }
 }
 
-// Emit the cancel signal at any time (same thread as the await):
+// Only callable on the thread that started the await (repeated calls emit repeatedly; caller's responsibility):
 source.requestCancel();
 ```
 
-Semantics: if the future finishes first you get the result; if the cancel signal arrives first, the coroutine is woken up and `async::OperationCancelled` is thrown at the `co_await` point. **Single-threaded only**: `requestCancel()` must be called on the same thread that started the await (usually the main thread). Passing `nullptr` as the source degrades to a plain wait. `CancellationSource` carries `Q_OBJECT` and needs moc (AUTOMOC is already enabled in this project).
+Semantics: if the future finishes first you get the result; if the cancel signal arrives first, the coroutine is woken up and `async::OperationCancelled` is thrown at the `co_await` point. **Single-threaded only**: `requestCancel()` must be called on the same thread that started the await — the emission is direct, so the coroutine resumes synchronously on your call stack (mind reentrancy); a cancel requested before the await throws immediately at `co_await`, without suspending. Passing `nullptr` as the source degrades to a plain wait. `CancellationSource` carries `Q_OBJECT` and needs moc (AUTOMOC is already enabled in this project).
 
 ## `async::Task` ownership semantics
 
