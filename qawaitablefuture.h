@@ -187,8 +187,8 @@ public:
         watcher_ = new QFutureWatcher<T>();
 
         QObject::connect(watcher_,&QFutureWatcher<T>::finished, watcher_,[h] ()mutable {
-                h.resume();
-            },Qt::QueuedConnection);
+            h.resume();
+        });
         watcher_->setFuture(future_);
     }
 
@@ -200,7 +200,6 @@ public:
             return;
         }
         else {
-            future_.waitForFinished();
             return future_.result();
         }
     }
