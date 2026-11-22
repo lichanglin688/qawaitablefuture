@@ -159,6 +159,28 @@ async::Task withReadyValue()
 
 这类 future 一出生就是完成态，`await_ready()` 直接返回 `true`，`co_await` 处**不会挂起**：既不创建 `QFutureWatcher`，也不依赖事件循环，协程同步往下跑。适合把同步值直接塞进协程流程，或与真正异步的 future 混用。
 
+### 7. 取消（`cancellation.h`，单线程）
+
+```cpp
+async::CancellationSource source;
+
+async::Task work()
+{
+    auto fut = QtConcurrent::run([] { /* 长任务 */ return 42; });
+    try {
+        const int v = co_await async::CancellableFutureAwaiter(fut, &source); // CTAD
+        qDebug() << v;
+    } catch (const async::OperationCancelled &) {
+        qDebug() << "cancelled";
+    }
+}
+
+// 任意时刻（与 await 同一线程）发出取消信号：
+source.requestCancel();
+```
+
+语义：future 先完成则正常拿结果；取消信号先到则协程被唤醒，`co_await` 处抛 `async::OperationCancelled`，不再等待结果。**仅支持单线程使用**：`requestCancel()` 必须与发起 await 的线程相同（通常就是主线程）。`source` 可传 `nullptr`，此时退化为普通等待。`CancellationSource` 带 `Q_OBJECT`，需要 moc（本工程 AUTOMOC 已开启）。
+
 ## async::Task 的所有权语义
 
 `async::Task` 不是 `unique_ptr`，它只管"取消权"，不管协程的生命周期：
@@ -234,6 +256,8 @@ ctest --test-dir build --output-on-failure
 
 ```
 qawaitablefuture.h              # 全部实现：async::Task / async::FutureAwaiter / operator co_await
+lazy_task.h                     # async::LazyTask<T>：惰性、一次性、有返回值的协程
+cancellation.h                  # async::CancellationSource / async::CancellableFutureAwaiter：取消
 main.cpp                       # 演示程序
 tests/test_qawaitablefuture.cpp # Qt Test 用例
 CMakeLists.txt                 # demo 目标

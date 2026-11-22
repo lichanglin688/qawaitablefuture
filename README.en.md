@@ -159,6 +159,28 @@ async::Task withReadyValue()
 
 Such a future is finished from birth: `await_ready()` returns `true`, so the `co_await` **never suspends**. No `QFutureWatcher` is created and no event loop is needed — the coroutine just continues synchronously. Handy for feeding a plain value into a coroutine flow, or mixing it with genuinely asynchronous futures.
 
+### 7. Cancellation (`cancellation.h`, single-threaded)
+
+```cpp
+async::CancellationSource source;
+
+async::Task work()
+{
+    auto fut = QtConcurrent::run([] { /* long job */ return 42; });
+    try {
+        const int v = co_await async::CancellableFutureAwaiter(fut, &source); // CTAD
+        qDebug() << v;
+    } catch (const async::OperationCancelled &) {
+        qDebug() << "cancelled";
+    }
+}
+
+// Emit the cancel signal at any time (same thread as the await):
+source.requestCancel();
+```
+
+Semantics: if the future finishes first you get the result; if the cancel signal arrives first, the coroutine is woken up and `async::OperationCancelled` is thrown at the `co_await` point. **Single-threaded only**: `requestCancel()` must be called on the same thread that started the await (usually the main thread). Passing `nullptr` as the source degrades to a plain wait. `CancellationSource` carries `Q_OBJECT` and needs moc (AUTOMOC is already enabled in this project).
+
 ## `async::Task` ownership semantics
 
 `async::Task` is not a `unique_ptr`: it owns the *right to cancel*, not the coroutine's lifetime.
@@ -234,6 +256,8 @@ ctest --test-dir build --output-on-failure
 
 ```
 qawaitablefuture.h              # everything: async::Task / async::FutureAwaiter / operator co_await
+lazy_task.h                     # async::LazyTask<T>: lazy, one-shot coroutines with a result
+cancellation.h                  # async::CancellationSource / async::CancellableFutureAwaiter: cancellation
 main.cpp                       # demo program
 tests/test_qawaitablefuture.cpp # Qt Test cases
 CMakeLists.txt                 # demo target

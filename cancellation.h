@@ -7,20 +7,21 @@
 //   async::CancellationSource source;
 //   const int v = co_await async::CancellableFutureAwaiter(QtConcurrent::run([] { ...; return 42; }), &source);
 //
-//   // 任意线程、任意时机调用（幂等，只有第一次真正发出信号）：
+//   // 与 await 发起方在同一线程调用（可多次调用，只有第一次真正发出信号）：
 //   source.requestCancel();
 //
 // 语义约定：
-//   - future 先完成 → 正常拿到结果，之后到来的取消信号被忽略；
-//     取消信号先到 → 协程被唤醒，co_await 处抛 async::OperationCancelled。
-//   - 恢复线程与 qawaitablefuture.h 一致：回到发起 await 的线程（需要事件循环）。
+//   - 单线程使用：CancellationSource 与 CancellableFutureAwaiter 不做跨线程保护，
+//     requestCancel() 必须与发起 await 的线程相同（通常就是主线程）。
+//   - 谁先到谁赢：future 先完成则正常返回结果，之后到来的取消信号被忽略；
+//     取消信号先到则抛 OperationCancelled，不再等待 future 的结果。
+//   - 恢复线程与 qawaitablefuture.h 一致：总是回到发起 await 的线程（需要事件循环）。
 //   - source 允许传 nullptr，此时退化为普通 FutureAwaiter。
 //
 // 注意：CancellationSource 带 Q_OBJECT，需要 moc。本工程 CMake 已开启 AUTOMOC，
 // 只要某个编译单元 #include 了本头文件就会自动处理；外部使用方需保证 AUTOMOC 开启。
 #pragma once
 
-#include <atomic>
 #include <coroutine>
 #include <type_traits>
 #include <utility>
@@ -52,24 +53,22 @@ class CancellationSource : public QObject {
 public:
     using QObject::QObject;
 
-    // 发出取消信号。重复调用是 no-op。
+    // 发出取消信号。重复调用是 no-op。仅允许在发起 await 的线程调用。
     void requestCancel()
     {
-        bool expected = false;
-        if (cancelled_.compare_exchange_strong(expected, true))
+        if (!cancelled_) {
+            cancelled_ = true;
             emit cancelled();
+        }
     }
 
-    bool isCancelRequested() const noexcept
-    {
-        return cancelled_.load(std::memory_order_acquire);
-    }
+    bool isCancelRequested() const noexcept { return cancelled_; }
 
 signals:
     void cancelled();
 
 private:
-    std::atomic<bool> cancelled_{false};
+    bool cancelled_ = false; // 单线程使用，无需原子
 };
 
 // 可取消的 QFuture awaiter：
@@ -107,7 +106,8 @@ public:
 
         // 事件二：取消信号的"槽"。异常不能在这里抛（会打穿 Qt 事件循环），
         // 只标记取消并恢复协程，让 await_resume() 在 co_await 处把异常抛给用户。
-        // 强制 QueuedConnection：无论 requestCancel() 在哪个线程被调，恢复都回到本线程。
+        // QueuedConnection 让恢复统一走事件循环，避免在 requestCancel() 的调用栈里同步重入
+        // （本机制只支持单线程使用，不支持从其他线程 requestCancel）。
         if (source_) {
             QObject::connect(source_, &CancellationSource::cancelled, watcher_, [this, h]() mutable {
                 if (resumed_)
